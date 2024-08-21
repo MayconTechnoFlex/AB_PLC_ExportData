@@ -1,0 +1,129 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import pandas as pd
+from pylogix import PLC
+import os
+
+
+class CLPApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("CLP Data Exporter")
+
+        # Variáveis para armazenar configurações
+        self.ip_address = tk.StringVar()
+        self.trigger_tag = tk.StringVar()
+        self.csv_filename = tk.StringVar(value="dados_clp.csv")  # Nome padrão do arquivo CSV
+        self.tags = []
+        self.headers = []
+        self.entries = []
+        self.save_path = tk.StringVar()
+
+        # Criar as abas de interface
+        self.create_tabs()
+        self.create_home_tab()
+        self.create_config_tab()
+
+    def create_tabs(self):
+        self.tabControl = ttk.Notebook(self)
+        self.tab_home = ttk.Frame(self.tabControl)
+        self.tab_config = ttk.Frame(self.tabControl)
+
+        self.tabControl.add(self.tab_home, text="Home")
+        self.tabControl.add(self.tab_config, text="Configurações")
+        self.tabControl.pack(expand=1, fill="both")
+
+    def create_home_tab(self):
+        ttk.Label(self.tab_home, text="Status:").grid(column=0, row=0, padx=10, pady=10)
+        self.status_label = ttk.Label(self.tab_home, text="Aguardando...")
+        self.status_label.grid(column=1, row=0, padx=10, pady=10)
+
+        ttk.Button(self.tab_home, text="Selecionar Caminho", command=self.select_save_path).grid(column=0, row=1,
+                                                                                                 padx=10, pady=10)
+        ttk.Label(self.tab_home, textvariable=self.save_path).grid(column=1, row=1, padx=10, pady=10)
+
+    def create_config_tab(self):
+        ttk.Label(self.tab_config, text="IP do CLP:").grid(column=0, row=0, padx=10, pady=10)
+        ttk.Entry(self.tab_config, textvariable=self.ip_address).grid(column=1, row=0, padx=10, pady=10)
+
+        ttk.Label(self.tab_config, text="TAG de Trigger:").grid(column=0, row=1, padx=10, pady=10)
+        ttk.Entry(self.tab_config, textvariable=self.trigger_tag).grid(column=1, row=1, padx=10, pady=10)
+
+        ttk.Label(self.tab_config, text="Nome do Arquivo CSV:").grid(column=0, row=2, padx=10, pady=10)
+        ttk.Entry(self.tab_config, textvariable=self.csv_filename).grid(column=1, row=2, padx=10, pady=10)
+
+        ttk.Button(self.tab_config, text="Adicionar TAG", command=self.add_tag).grid(column=0, row=3, padx=10, pady=10)
+
+        # Adicionar cabeçalhos explicativos para os campos de TAG e Cabeçalho
+        ttk.Label(self.tab_config, text="Nome da TAG").grid(column=0, row=4, padx=10, pady=10)
+        ttk.Label(self.tab_config, text="Cabeçalho do CSV").grid(column=1, row=4, padx=10, pady=10)
+
+        self.tags_frame = ttk.Frame(self.tab_config)
+        self.tags_frame.grid(column=0, row=5, columnspan=2, padx=10, pady=10)
+
+    def select_save_path(self):
+        path = filedialog.askdirectory()
+        if path:
+            self.save_path.set(path)
+
+    def add_tag(self):
+        # Função para adicionar um campo de entrada para TAGs e um para o cabeçalho
+        new_tag = tk.StringVar()
+        new_header = tk.StringVar()
+        self.tags.append(new_tag)
+        self.headers.append(new_header)
+
+        row = len(self.tags) - 1
+        tag_entry = ttk.Entry(self.tags_frame, textvariable=new_tag)
+        tag_entry.grid(column=0, row=row, padx=5, pady=5)
+
+        header_entry = ttk.Entry(self.tags_frame, textvariable=new_header)
+        header_entry.grid(column=1, row=row, padx=5, pady=5)
+
+        remove_button = ttk.Button(self.tags_frame, text="Remover", command=lambda: self.remove_tag(row))
+        remove_button.grid(column=2, row=row, padx=5, pady=5)
+
+        self.entries.append((tag_entry, header_entry, remove_button))
+
+    def remove_tag(self, index):
+        # Remover os widgets da interface
+        for widget in self.entries[index]:
+            widget.grid_forget()
+
+        # Limpar as variáveis
+        self.tags[index].set("")
+        self.headers[index].set("")
+
+    def start_reading(self):
+        try:
+            with PLC() as comm:
+                comm.IPAddress = self.ip_address.get()
+
+                # Verificar o valor da TAG de Trigger
+                trigger_value = comm.Read(self.trigger_tag.get()).Value
+                if trigger_value:  # Se o valor for True, por exemplo, ou conforme sua lógica
+                    data = {tag.get(): comm.Read(tag.get()).Value for tag in self.tags if tag.get()}
+
+                    # Criar DataFrame
+                    df = pd.DataFrame([data])
+                    df.columns = [header.get() for header in self.headers if header.get()]
+
+                    # Salvar ou atualizar arquivo CSV
+                    file_path = os.path.join(self.save_path.get(), self.csv_filename.get())
+                    if os.path.exists(file_path):
+                        df.to_csv(file_path, mode='a', header=False, index=False)
+                    else:
+                        df.to_csv(file_path, index=False)
+
+                    self.status_label.config(text=f"Exportação realizada com sucesso em {pd.Timestamp.now()}")
+                else:
+                    self.status_label.config(text="Trigger não acionado.")
+
+        except Exception as e:
+            self.status_label.config(text=f"Erro: {str(e)}")
+            messagebox.showerror("Erro", f"Falha na exportação dos dados: {str(e)}")
+
+
+if __name__ == "__main__":
+    app = CLPApp()
+    app.mainloop()
